@@ -16,9 +16,7 @@ from tensorflow.python import debug as tf_debug
 _NTMStateTuple = collections.namedtuple('NTMStateTuple', ('memory', 'controller', 'read', 'write'))
 
 class NTMStateTuple(_NTMStateTuple):
-  """Tuple used by LSTM Cells for `state_size`, `zero_state`, and output state.
-  Stores two elements: `(c, h)`, in that order.
-  Only used when `state_is_tuple=True`.
+  """Tuple used by NTM Cells for storing current state information
   """
   __slots__ = ()
 
@@ -26,19 +24,20 @@ def cosine_similarity(key, memory):
   return tf.matmul(tf.expand_dims(tf.nn.l2_normalize(key, dim=0), 0), tf.nn.l2_normalize(memory, dim=1), transpose_b=True)
 
 def circular_convolution(weight, shift):
+  """Performs a circular convolution on the weight vector. Currently hardcoded for shift of +/- 1 only
+  """
+
   weight = tf.concat([weight[:,-1:], weight, weight[:,0:1]], axis=1)
   weight = tf.reshape(weight, [1, 1, int(weight.get_shape()[-1]), 1])
   shift = tf.reshape(shift, [1, int(shift.get_shape()[-1]), 1, 1])
   conv = tf.nn.conv2d(weight, shift, strides=[1,1,1,1], padding='VALID')
   return tf.reshape(conv, [1, int(conv.get_shape()[2])])
 
-# class ControllerBase():
-#   def __init__(self, output_dim, activation=None):
-
-#   def __call__(self, _input, state):
-#     raise 
 
 class FeedforwardController():
+  """A wrapper class for a feedforward controller
+  """
+
   def __init__(self, output_dim, activation=None):
     self.output_dim = output_dim
     self.activation = activation
@@ -63,7 +62,7 @@ class NTMCell():
     self.mem_dim = mem_dim
     self.mem_size = mem_size
     self.controller = controller
-    self.controller_dim = 100
+    self.controller_dim = controller.output_dim
     self.num_read_heads = read_heads
     self.num_write_heads = write_heads
     self.shift_dim = shift_dim
@@ -108,11 +107,11 @@ class NTMCell():
       return ctrl_output, state
 
   def zero_state(self):
+
     mem = tf.truncated_normal([self.mem_size, self.mem_dim], mean=0.5, stddev=0.2)
     read = []
     write = []
     for i in range(self.num_read_heads):
-      # read.append((tf.truncated_normal([1, self.mem_size], mean=0.4, stddev=0.1), tf.fill([1, self.mem_dim], 1e-6)))
       read.append((tf.fill([1, self.mem_size], 1e-6), tf.fill([1, self.mem_dim], 1e-6)))
     for i in range(self.num_write_heads):
       write.append(tf.fill([1, self.mem_size], 1e-6))
@@ -162,13 +161,26 @@ class NTMCell():
     return weight, erase, add
 
 
-
 def dynamic_ntm(cell, _inputs):
-  """Dynamic unrolling of NTM Cell
+  """Dynamic unrolling of an NTM Cell. Similar to the tf.nn.dynamic_rnn function.
 
   Args:
     cell: an NTM cell
     _inputs: A 'Tensor' of shape [time, batch_size, input_size]
+
+  Returns:
+    A tuple (outputs, read_ws, write_ws, mem_states, final_state) where:
+
+      outputs: The controller hidden states at each time step
+
+      read_ws: A list containing the read weights from each read head at each time step
+
+      write_ws: A list containing the write weights from each write head at each time step
+
+      mem_states: A tensor containing the memory contents at each time step
+
+      final_state: The final state tuple
+
   """
 
   with tf.variable_scope('ntm') as varscope:
@@ -213,12 +225,13 @@ def dynamic_ntm(cell, _inputs):
         parallel_iterations=32,
         swap_memory=True)
 
-    final_outputs = output_final_ta.stack()
-    final_read_ws = read_final_ta.stack()
-    final_write_ws = write_final_ta.stack()
-    final_mem_states = mem_state_final_ta.stack()
+    outputs = output_final_ta.stack()
+    read_ws = read_final_ta.stack()
+    write_ws = write_final_ta.stack()
+    mem_states = mem_state_final_ta.stack()
 
-    return final_outputs, final_read_ws, final_write_ws, final_mem_states, final_state
+    return outputs, read_ws, write_ws, mem_states, final_state
+
 
 class NTMModel():
   def __init__(self, ntm_cell, train=False, batch_size=1, input_dim=10, target_dim=10):

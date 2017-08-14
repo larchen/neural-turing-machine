@@ -17,6 +17,15 @@ from utils import *
 FLAGS = None
 
 def create_copy_example(length):
+  """Creates a single copy example
+
+  Args:
+    length: the length of the copy sequence.
+
+  Returns:
+    A tuple (ex_input, ex_target), both with shape [2*length+2, batch_size, 10]
+
+  """
   start = np.zeros((1, 1, 10))
   end = np.zeros((1, 1, 10))
   start[0][0][0] = 1
